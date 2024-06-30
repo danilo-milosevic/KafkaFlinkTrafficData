@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.7.1
+    container_name: zookeeper_flink
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    ports:
+      - "2181:2181"
+    networks:
+      - kafka_flink_net
+
+  kafka:
+    image: bitnami/kafka:3.2.0
+    container_name: kafka_flink
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,PLAINTEXT_HOST://:9094
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    networks:
+      - kafka_flink_net
+
+  jobmanager:
+    image: flink:1.19.0
+    expose:
+      - "6123"  # Flink JobManager RPC port
+    ports:
+      - "8081:8081"  # Flink Web UI port
+    depends_on:
+      - kafka
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+    command: jobmanager
+    networks:
+      - kafka_flink_net
+
+  taskmanager:
+    image: flink:1.19.0
+    expose:
+      - "6121"  # Flink TaskManager RPC port
+    depends_on:
+      - jobmanager
+    environment:
+      - TASK_MANAGER_RPC_ADDRESS=taskmanager
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+    command: taskmanager
+    networks:
+      - kafka_flink_net
+
+networks:
+  kafka_flink_net:
+    driver: bridge
