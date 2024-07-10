@@ -14,7 +14,7 @@ from pyflink.datastream import DataStream
 import datetime
 import os
 from pathlib import Path
-
+import time
 
 class ProcessWindowFunction(WindowFunction):
     def __init__(self, func):
@@ -103,9 +103,10 @@ class ConsumerFlink:
         return res
     
     def consume(self, config):
+        start = time.time()
         env = StreamExecutionEnvironment.get_execution_environment()
+        env.set_parallelism(config['num_proc'])
         self.add_jars(env)
-
         kafka_stream = self.init_stream(config, env)
 
         xy_inds = config['xy_inds']
@@ -169,6 +170,9 @@ class ConsumerFlink:
         
         try:
             env.execute()
+        except KeyboardInterrupt:
+            end = time.time()
+            print("Execution time in s: ", (end-start))
         except Exception as e:
             print("Execute failed: ",e)
 
@@ -194,7 +198,8 @@ class ConsumerFlink:
             'xy_inds':(6,7),
             'stream_types':ems_type,
             'zoned_types':ems_zone,
-            'key_by': lambda x: x[8]
+            'key_by': lambda x: x[8],
+            'num_proc':8
         }
 
         i = 1
@@ -222,8 +227,16 @@ class ConsumerFlink:
                 i += 1
             
             if args[i] == "--out":
-                config['out_topic'] = 'ems_out_topic_flink'
+                config['out_topic'] = 'ems_out_topic_flink' if config['topic']=='emsTopic' else 'fcd_out_topic_flink'
                 i += 1
+
+            if(args[i]=='--n'):
+                i+=1
+                try:
+                    config['num_proc'] = int(args[i])
+                except:
+                    config['num_proc'] = 8
+                i+=1
             
             config['xZones'] = int(args[i])
             i += 1

@@ -1,11 +1,10 @@
 from kafka import KafkaProducer
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, udf, window, avg
-from pyspark.sql.streaming import StreamingQueryException
 from pyspark.sql.types import DoubleType, IntegerType
 import sys
 from pyspark.sql.functions import col, avg, udf, window, lit, concat, unix_timestamp, from_unixtime
-
+import time
 
 import os
 os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.2.0 pyspark-shell'
@@ -50,7 +49,8 @@ class EmissionConsumerSpark:
         return formatted_output
         
     def consume(self, config):
-        spark = SparkSession.builder.appName("EMS").master("local[*]").getOrCreate()
+        start = time.time()
+        spark = SparkSession.builder.appName("EMS").master(f"local[{config['num_proc']}]").getOrCreate()
 
         kafkaDF = spark.readStream.format("kafka")\
             .option("kafka.bootstrap.servers", "kafka:9092")\
@@ -113,15 +113,20 @@ class EmissionConsumerSpark:
             )).selectExpr("CAST(value AS STRING)")
         
         producer = KafkaProducer(bootstrap_servers='kafka:9092')
-        query = formated_data \
-                .writeStream \
-                .outputMode("complete") \
-                .foreachBatch(lambda batch_df, batch_id: 
-                    [(producer.send(config['out_topic'], value=row.value.encode('utf-8'))) for row in batch_df.collect() if config['out_topic'] is not None]+
-                    [print(EmissionConsumerSpark.format_console_output(row)) for row in batch_df.collect()]
-                ) \
-                .start()
-        query.awaitTermination()
+        try:
+            query = formated_data \
+                    .writeStream \
+                    .outputMode("complete") \
+                    .foreachBatch(lambda batch_df, batch_id: 
+                        [(producer.send(config['out_topic'], value=row.value.encode('utf-8'))) for row in batch_df.collect() if config['out_topic'] is not None]+
+                        [print(EmissionConsumerSpark.format_console_output(row)) for row in batch_df.collect()]
+                    ) \
+                    .start()
+            
+            query.awaitTermination()
+        except Exception as e:
+            end = time.time()
+            print("Time in s: ",(end-start))
         producer.close()
 
     @staticmethod
@@ -135,7 +140,8 @@ class EmissionConsumerSpark:
             'slideWindowSeconds':1,#s
             'xZones':4,
             'yZones': 4,
-            'error':False
+            'error':False,
+            'num_proc':'*'
         }
         i=1
         try:
@@ -154,7 +160,15 @@ class EmissionConsumerSpark:
             if(args[i]=="--out"):
                 config['out_topic'] = "ems_out_topic_spark"
                 i+=1
-            
+
+            if(args[i]=='--n'):
+                i+=1
+                try:
+                    config['num_proc'] = str(int(args[i]))
+                except:
+                    config['num_proc'] = '*'
+                i+=1
+                
             config['xZones'] = int(args[i])
             i+=1
 
